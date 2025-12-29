@@ -83,6 +83,9 @@ fn run(gpa: Allocator, arena: Allocator, sighandler: *SigHandler) !void {
     }
 
     const user_agent = blk: {
+        if (args.userAgent()) |ua| {
+            break :blk try std.fmt.allocPrintSentinel(arena, "User-Agent: {s}", .{ua}, 0);
+        }
         const USER_AGENT = "User-Agent: Lightpanda/1.0";
         if (args.userAgentSuffix()) |suffix| {
             break :blk try std.fmt.allocPrintSentinel(arena, "{s} {s}", .{ USER_AGENT, suffix }, 0);
@@ -260,6 +263,13 @@ const Command = struct {
         };
     }
 
+    fn userAgent(self: *const Command) ?[]const u8 {
+        return switch (self.mode) {
+            inline .serve, .fetch => |opts| opts.common.user_agent,
+            else => unreachable,
+        };
+    }
+
     fn userAgentSuffix(self: *const Command) ?[]const u8 {
         return switch (self.mode) {
             inline .serve, .fetch => |opts| opts.common.user_agent_suffix,
@@ -300,6 +310,7 @@ const Command = struct {
         log_level: ?log.Level = null,
         log_format: ?log.Format = null,
         log_filter_scopes: ?[]log.Scope = null,
+        user_agent: ?[]const u8 = null,
         user_agent_suffix: ?[]const u8 = null,
     };
 
@@ -350,6 +361,9 @@ const Command = struct {
             \\--log_filter_scopes
             \\                Filter out too verbose logs per scope:
             \\                http, unknown_prop, script_event, ...
+            \\
+            \\--user_agent    Override the User-Agent header completely.
+            \\                If set, --user_agent_suffix is ignored.
             \\
             \\--user_agent_suffix
             \\                Suffix to append to the Lightpanda/X.Y User-Agent
@@ -766,6 +780,21 @@ fn parseCommonArg(
             });
         }
         common.log_filter_scopes = arr.items;
+        return true;
+    }
+
+    if (std.mem.eql(u8, "--user_agent", opt)) {
+        const str = args.next() orelse {
+            log.fatal(.app, "missing argument value", .{ .arg = "--user_agent" });
+            return error.InvalidArgument;
+        };
+        for (str) |c| {
+            if (!std.ascii.isPrint(c)) {
+                log.fatal(.app, "not printable character", .{ .arg = "--user_agent" });
+                return error.InvalidArgument;
+            }
+        }
+        common.user_agent = try allocator.dupe(u8, str);
         return true;
     }
 
